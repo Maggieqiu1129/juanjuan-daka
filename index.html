@@ -297,8 +297,11 @@ async function saveToCloud() {
     lessonPlan: state.lessonPlan
   };
   try {
-    // Try to get existing record first
-    const existing = await supabaseAPI('app_data?key=eq.main&select=key');
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    const existing = await supabaseAPI('app_data?key=eq.main&select=key', { signal: ctrl.signal });
+    clearTimeout(timer);
+
     if (existing && existing.length > 0) {
       await supabaseAPI('app_data?key=eq.main', {
         method: 'PATCH',
@@ -312,7 +315,9 @@ async function saveToCloud() {
     }
     updateSyncIndicator('online');
   } catch(e) {
-    console.error('保存失败', e);
+    console.error('保存失败:', e.message);
+    updateSyncIndicator('offline');
+    showToast('云端连接失败: ' + (e.name === 'AbortError' ? '请求超时' : e.message));
   }
 }
 
