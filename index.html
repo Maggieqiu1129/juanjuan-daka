@@ -6,8 +6,6 @@
 <title>快乐卷卷 · 学习打卡监督工具</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css">
-<!-- Supabase SDK - 多人协作数据同步 -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700;900&family=Noto+Sans+SC:wght@300;400;500;700&display=swap');
 
@@ -233,38 +231,42 @@ let saveTimeout = null;    // 防抖保存
 // ============================================================
 // DATA LAYER — 自动选择云端/本地
 // ============================================================
-let supabase = null;
-
 function initCloud() {
-  if (SUPABASE_CONFIG.url && SUPABASE_CONFIG.key && typeof supabase !== 'undefined') {
-    try {
-      supabase = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.key);
-      isCloudMode = true;
-      return true;
-    } catch(e) {
-      console.warn('Supabase 初始化失败，使用本地模式', e);
-    }
+  if (SUPABASE_CONFIG.url && SUPABASE_CONFIG.key) {
+    isCloudMode = true;
+    return true;
   }
   isCloudMode = false;
   return false;
 }
 
+async function supabaseAPI(path, options = {}) {
+  const url = SUPABASE_CONFIG.url + '/rest/v1/' + path;
+  const headers = {
+    'apikey': SUPABASE_CONFIG.key,
+    'Authorization': 'Bearer ' + SUPABASE_CONFIG.key,
+    'Content-Type': 'application/json',
+    ...(options.headers || {})
+  };
+  const res = await fetch(url, { ...options, headers });
+  if (!res.ok) throw new Error('API error: ' + res.status);
+  return res.json();
+}
+
 async function loadState() {
-  if (isCloudMode && supabase) {
+  if (isCloudMode) {
     try {
-      const { data, error } = await supabase.from('app_data').select('json_data').eq('key', 'main').single();
-      if (data && data.json_data) {
-        const d = data.json_data;
+      const data = await supabaseAPI('app_data?key=eq.main&select=*');
+      if (data && data.length > 0 && data[0].json_data) {
+        const d = data[0].json_data;
         state.members = d.members || [...REAL_MEMBERS];
         state.checkins = d.checkins || {};
         state.lessonPlan = d.lessonPlan || { module: '1', range: '第1-5讲' };
         return;
       }
-      if (!error) {
-        await saveToCloud(true);
-        return;
-      }
-      throw error;
+      // No data yet, create initial
+      await saveToCloud(true);
+      return;
     } catch(e) {
       console.error('云端加载失败，切换本地模式', e);
       isCloudMode = false;
@@ -275,7 +277,7 @@ async function loadState() {
 }
 
 async function saveState(immediate) {
-  if (isCloudMode && supabase) {
+  if (isCloudMode) {
     if (!immediate) {
       if (saveTimeout) clearTimeout(saveTimeout);
       saveTimeout = setTimeout(() => saveToCloud(false), 800);
@@ -294,12 +296,24 @@ async function saveToCloud() {
     checkins: state.checkins,
     lessonPlan: state.lessonPlan
   };
-  const { error } = await supabase.from('app_data').upsert(
-    { key: 'main', json_data: jsonData, updated_at: new Date().toISOString() },
-    { onConflict: 'key' }
-  );
-  if (!error) updateSyncIndicator('online');
-  else console.error('保存失败', error);
+  try {
+    // Try to get existing record first
+    const existing = await supabaseAPI('app_data?key=eq.main&select=key');
+    if (existing && existing.length > 0) {
+      await supabaseAPI('app_data?key=eq.main', {
+        method: 'PATCH',
+        body: JSON.stringify({ json_data: jsonData, updated_at: new Date().toISOString() })
+      });
+    } else {
+      await supabaseAPI('app_data', {
+        method: 'POST',
+        body: JSON.stringify({ key: 'main', json_data: jsonData, updated_at: new Date().toISOString() })
+      });
+    }
+    updateSyncIndicator('online');
+  } catch(e) {
+    console.error('保存失败', e);
+  }
 }
 
 function loadFromLocal() {
@@ -716,12 +730,16 @@ function openReminder() {
     </div>`);
 }
 
-function testCloudConnection() {
-  if (!supabase) { showToast('未连接云端'); return; }
-  supabase.from('app_data').select('key').eq('key', 'main').single().then(({ data, error }) => {
-    if (error) { showToast('连接失败：数据库表不存在，请执行 SQL'); document.getElementById('cloudStatusLabel').textContent = '表未创建'; }
-    else { showToast('云端连接正常！'); document.getElementById('cloudStatusLabel').textContent = '✅ 云端协作正常'; }
-  });
+async function testCloudConnection() {
+  if (!isCloudMode) { showToast('未配置云端'); return; }
+  try {
+    await supabaseAPI('app_data?key=eq.main&select=key');
+    showToast('云端连接正常！');
+    document.getElementById('cloudStatusLabel').textContent = '✅ 云端协作正常';
+  } catch(e) {
+    showToast('连接失败：数据库表不存在，请执行 SQL');
+    document.getElementById('cloudStatusLabel').textContent = '表未创建';
+  }
 }
 
 function openSettings() {
