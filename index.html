@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>快乐卷卷 · 学习打卡监督工具</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css">
+<!-- LeanCloud SDK - 多人协作数据同步 -->
+<script src="https://cdn.jsdelivr.net/npm/leancloud-storage@4/dist/av-min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700;900&family=Noto+Sans+SC:wght@300;400;500;700&display=swap');
+
+:root {
+  --blue: #0A1F3F;
+  --gold: #C8963E;
+  --gold-light: #F5E6C8;
+}
+
+* { box-sizing: border-box; }
+body {
+  font-family: 'Noto Sans SC', sans-serif;
+  background: #F5F5F0;
+  color: #1a1a1a;
+  margin: 0;
+  min-height: 100vh;
+}
+
+/* Cell */
+.cell {
+  width: 42px; height: 42px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 16px;
+  transition: all 0.15s ease; user-select: none;
+  border: 2px solid transparent; font-weight: 500;
+}
+.cell:hover { transform: scale(1.08); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+.cell--empty { background: #F3F4F6; color: #D1D5DB; border-color: #E5E7EB; }
+.cell--done { background: #D1FAE5; color: #059669; border-color: #A7F3D0; }
+.cell--miss { background: #FEE2E2; color: #DC2626; border-color: #FECACA; }
+.cell--free { background: #EDE9FE; color: #7C3AED; border-color: #C4B5FD; }
+.cell--makeup { background: #DBEAFE; color: #2563EB; border-color: #BFDBFE; }
+.cell--weekend { background: #F3F4F6; color: #9CA3AF; border-color: #E5E7EB; cursor: default; }
+.cell--weekend:hover { transform: none; box-shadow: none; }
+.cell--today { box-shadow: 0 0 0 3px rgba(200,150,62,0.4); }
+.member-row { transition: background 0.2s; }
+.member-row:hover { background: rgba(200,150,62,0.05); }
+
+/* Status badge */
+.status-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 12px; border-radius: 20px;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.5px;
+}
+.status-ok { background: #D1FAE5; color: #059669; }
+.status-penalty { background: #FEE2E2; color: #DC2626; }
+.status-makeup { background: #DBEAFE; color: #2563EB; }
+.status-pending { background: #F3F4F6; color: #6B7280; }
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 9px 18px; border-radius: 10px;
+  font-size: 13px; font-weight: 600; border: none;
+  cursor: pointer; transition: all 0.2s;
+  font-family: inherit; letter-spacing: 0.3px;
+}
+.btn-primary { background: var(--blue); color: white; }
+.btn-primary:hover { opacity: 0.9; transform: translateY(-1px); box-shadow: 0 4px 16px rgba(10,31,63,0.3); }
+.btn-gold { background: linear-gradient(135deg, #C8963E, #D4A853); color: white; }
+.btn-gold:hover { box-shadow: 0 4px 16px rgba(200,150,62,0.4); transform: translateY(-1px); }
+.btn-outline { background: white; border: 2px solid #E5E7EB; color: #374151; }
+.btn-outline:hover { border-color: var(--gold); color: var(--gold); }
+.btn-danger { background: #FEE2E2; color: #DC2626; border: 1px solid #FECACA; }
+.btn-danger:hover { background: #FECACA; }
+.btn-sm { padding: 6px 12px; font-size: 12px; border-radius: 8px; }
+.btn-cloud { background: linear-gradient(135deg, #059669, #10B981); color: white; }
+.btn-cloud:hover { box-shadow: 0 4px 16px rgba(5,150,105,0.4); transform: translateY(-1px); }
+
+input[type="text"], textarea, select {
+  border: 2px solid #E5E7EB; border-radius: 10px;
+  padding: 9px 14px; font-size: 14px;
+  font-family: inherit; outline: none;
+  transition: border-color 0.2s; background: white;
+}
+input[type="text"]:focus, textarea:focus, select:focus { border-color: var(--gold); }
+
+/* Modal */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.5); z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(2px);
+}
+.modal {
+  background: white; border-radius: 16px; padding: 28px;
+  max-width: 620px; width: 90%; max-height: 80vh;
+  overflow-y: auto; box-shadow: 0 25px 80px rgba(0,0,0,0.3);
+}
+
+/* Toast */
+.toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  background: #1F2937; color: white; padding: 10px 24px;
+  border-radius: 20px; font-size: 13px; z-index: 200;
+  animation: toastIn 0.3s ease, toastOut 0.3s ease 1.7s forwards;
+}
+@keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+@keyframes toastOut { from { opacity: 1; } to { opacity: 0; } }
+
+/* Sync indicator */
+.sync-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.sync-dot--online { background: #10B981; animation: pulse 2s infinite; }
+.sync-dot--offline { background: #9CA3AF; }
+.sync-dot--saving { background: #F59E0B; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+</style>
+</head>
+<body class="flex flex-col min-h-screen">
+
+<!-- ===== HEADER ===== -->
+<header class="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-50">
+  <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between flex-wrap gap-3">
+    <div class="flex items-center gap-3">
+      <span class="text-2xl">📚</span>
+      <div>
+        <h1 class="text-lg font-bold tracking-wide" style="font-family:'Noto Serif SC',serif;color:var(--blue)">快乐卷卷 · 打卡监督</h1>
+        <div class="flex items-center gap-1 text-xs">
+          <span id="syncIndicator" class="sync-dot sync-dot--offline"></span>
+          <span id="syncLabel" class="text-gray-400">单机模式</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-2 flex-wrap">
+      <button class="btn btn-outline btn-sm" onclick="prevWeek()"><i class="fa fa-chevron-left"></i></button>
+      <span class="text-sm font-semibold px-2 min-w-[180px] text-center" id="weekLabel"></span>
+      <button class="btn btn-outline btn-sm" onclick="nextWeek()"><i class="fa fa-chevron-right"></i></button>
+      <button class="btn btn-outline btn-sm" onclick="goCurrentWeek()">本周</button>
+
+      <span class="text-gray-300 mx-1">|</span>
+
+      <select id="moduleSelect" class="text-sm" onchange="updateLessonPlan()">
+        <option value="1">L1 模块1 心座初觉</option>
+        <option value="2">L2 模块2 心相通明</option>
+        <option value="3">L3 模块3 心宫知微</option>
+        <option value="4">L4 模块4 心盘化神</option>
+      </select>
+      <input type="text" id="lessonRange" value="第1-5讲" class="w-24 text-sm text-center" onchange="updateLessonPlan()">
+
+      <span class="text-gray-300 mx-1">|</span>
+
+      <button class="btn btn-gold btn-sm" onclick="openAddMember()"><i class="fa fa-plus"></i> 添加成员</button>
+      <button class="btn btn-outline btn-sm" onclick="openReminder()"><i class="fa fa-bell"></i> 提醒</button>
+      <button class="btn btn-outline btn-sm" onclick="openSettings()"><i class="fa fa-cog"></i></button>
+    </div>
+  </div>
+</header>
+
+<!-- ===== STATS BAR ===== -->
+<div class="max-w-7xl mx-auto px-4 py-4">
+  <div class="grid grid-cols-2 md:grid-cols-5 gap-3" id="statsBar"></div>
+</div>
+
+<!-- ===== MAIN TABLE ===== -->
+<div class="max-w-7xl mx-auto px-4 pb-8 flex-1">
+  <div class="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm" id="checkinTable">
+        <thead><tr class="border-b-2 border-gray-200 bg-gray-50" id="tableHead"></tr></thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+    <div class="text-center py-16 text-gray-400 hidden" id="emptyState">
+      <div class="text-5xl mb-4">📝</div>
+      <p class="text-lg font-semibold mb-2">还没有添加成员</p>
+      <p class="text-sm mb-4">点击「添加成员」开始管理学习小组</p>
+      <button class="btn btn-gold" onclick="openAddMember()"><i class="fa fa-plus"></i> 添加第一位成员</button>
+    </div>
+  </div>
+
+  <div class="flex items-center gap-4 mt-4 text-xs text-gray-500 flex-wrap">
+    <span>点击格子切换：</span>
+    <span class="flex items-center gap-1"><span class="w-5 h-5 rounded bg-green-100 border border-green-300 inline-block"></span>完成</span>
+    <span class="flex items-center gap-1"><span class="w-5 h-5 rounded bg-red-100 border border-red-300 inline-block"></span>未完成</span>
+    <span class="flex items-center gap-1"><span class="w-5 h-5 rounded bg-purple-100 border border-purple-300 inline-block"></span>免打卡</span>
+    <span class="flex items-center gap-1"><span class="w-5 h-5 rounded bg-blue-100 border border-blue-300 inline-block"></span>周末补</span>
+    <span class="flex items-center gap-1"><span class="w-5 h-5 rounded bg-gray-100 border border-gray-200 inline-block"></span>未评</span>
+  </div>
+</div>
+
+<!-- ===== PENALTY BAR ===== -->
+<div class="sticky bottom-0 bg-white border-t-2 border-red-200 shadow-lg z-40" id="penaltyBar"></div>
+
+<!-- ===== MODALS ===== -->
+<div id="modalContainer"></div>
+<div id="toastContainer"></div>
+
+<script>
+// ============================================================
+// 多人协作配置 — 填入你的 LeanCloud 密钥后自动切换云端模式
+// 注册地址：https://console.leancloud.cn/register
+// 创建应用后，在「设置 → 应用凭证」中获取 AppID 和 AppKey
+// ============================================================
+const LC_CONFIG = {
+  appId: '',   // 填入 LeanCloud AppID
+  appKey: '',  // 填入 LeanCloud AppKey
+};
+
+// ============================================================
+// CONSTANTS
+// ============================================================
+const DAY_LABELS = ['一','二','三','四','五','六','日'];
+const DAY_NAMES = ['周一','周二','周三','周四','周五','周六','周日'];
+const STATUS = { EMPTY: '', DONE: 'done', MISS: 'miss', FREE: 'free', MAKEUP: 'makeup' };
+const STATUS_ICON = { '': '⬜', done: '✅', miss: '❌', free: '🆓', makeup: '🔄' };
+const STATUS_CYCLE_WORKDAY = [STATUS.EMPTY, STATUS.DONE, STATUS.MISS, STATUS.FREE];
+const STATUS_CYCLE_WEEKEND = [STATUS.EMPTY, STATUS.DONE, STATUS.MAKEUP];
+const REAL_MEMBERS = ['曼俪','calinda','希希','梓奚','溪缘','欢喜','瑄','小蓓','一辰','星云','maggie','曦月'];
+
+// ============================================================
+// STATE
+// ============================================================
+let state = {
+  members: [...REAL_MEMBERS],
+  weekStart: '',
+  checkins: {},
+  lessonPlan: { module: '1', range: '第1-5讲' }
+};
+
+let cloudObjId = null;     // LeanCloud 对象 ID
+let isCloudMode = false;   // 是否云端模式
+let saveTimeout = null;    // 防抖保存
+
+// ============================================================
+// DATA LAYER — 自动选择云端/本地
+// ============================================================
+function initCloud() {
+  if (LC_CONFIG.appId && LC_CONFIG.appKey && typeof AV !== 'undefined') {
+    try {
+      const serverURL = LC_CONFIG.serverURL || `https://${LC_CONFIG.appId.substring(0,8)}.api.lncdn.net`;
+      AV.init({ appId: LC_CONFIG.appId, appKey: LC_CONFIG.appKey, serverURL });
+      isCloudMode = true;
+      return true;
+    } catch(e) {
+      console.warn('LeanCloud 初始化失败，使用本地模式', e);
+    }
+  }
+  isCloudMode = false;
+  return false;
+}
+
+async function loadState() {
+  if (isCloudMode) {
+    try {
+      const AppData = AV.Object.extend('AppData');
+      const query = new AV.Query('AppData');
+      query.equalTo('key', 'main');
+      const obj = await query.first();
+      if (obj) {
+        cloudObjId = obj.id;
+        const data = JSON.parse(obj.get('jsonData'));
+        state.members = data.members || [...REAL_MEMBERS];
+        state.checkins = data.checkins || {};
+        state.lessonPlan = data.lessonPlan || { module: '1', range: '第1-5讲' };
+        return;
+      }
+      // No data yet, create initial
+      await saveToCloud(true);
+      return;
+    } catch(e) {
+      console.error('云端加载失败，切换本地模式', e);
+      isCloudMode = false;
+      updateSyncIndicator();
+    }
+  }
+  loadFromLocal();
+}
+
+async function saveState(immediate) {
+  if (isCloudMode) {
+    if (!immediate) {
+      // Debounce: save after 800ms of inactivity
+      if (saveTimeout) clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(() => saveToCloud(false), 800);
+      updateSyncIndicator('saving');
+      return;
+    }
+    await saveToCloud(true);
+  } else {
+    saveToLocal();
+  }
+}
+
+async function saveToCloud(isNew) {
+  const AppData = AV.Object.extend('AppData');
+  let obj;
+  if (isNew && !cloudObjId) {
+    obj = new AppData();
+    obj.set('key', 'main');
+  } else {
+    obj = AV.Object.createWithoutData('AppData', cloudObjId);
+  }
+  obj.set('jsonData', JSON.stringify({
+    members: state.members,
+    checkins: state.checkins,
+    lessonPlan: state.lessonPlan
+  }));
+  obj.set('updatedAt', new Date().toISOString());
+  const saved = await obj.save();
+  cloudObjId = saved.id;
+  updateSyncIndicator('online');
+}
+
+function loadFromLocal() {
+  try {
+    const raw = localStorage.getItem('juanjuan_checkin_data');
+    if (raw) {
+      const data = JSON.parse(raw);
+      state.members = data.members || [...REAL_MEMBERS];
+      state.checkins = data.checkins || {};
+      state.lessonPlan = data.lessonPlan || { module: '1', range: '第1-5讲' };
+    }
+  } catch(e) {}
+}
+
+function saveToLocal() {
+  localStorage.setItem('juanjuan_checkin_data', JSON.stringify({
+    members: state.members,
+    checkins: state.checkins,
+    lessonPlan: state.lessonPlan
+  }));
+}
+
+function updateSyncIndicator(mode) {
+  const dot = document.getElementById('syncIndicator');
+  const label = document.getElementById('syncLabel');
+  dot.className = 'sync-dot';
+  if (mode === 'online') {
+    dot.classList.add('sync-dot--online');
+    label.textContent = '云端协作';
+  } else if (mode === 'saving') {
+    dot.classList.add('sync-dot--saving');
+    label.textContent = '同步中...';
+  } else {
+    dot.classList.add('sync-dot--offline');
+    label.textContent = '单机模式';
+  }
+}
+
+// ============================================================
+// UTILS
+// ============================================================
+function getMonday(d) {
+  const date = new Date(d);
+  const day = date.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  date.setDate(date.getDate() + diff);
+  date.setHours(0,0,0,0);
+  return date;
+}
+function formatDate(d) { return (d.getMonth()+1) + '/' + d.getDate(); }
+function dateStr(d) {
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function isWeekend(i) { return i >= 5; }
+function isDayToday(dateStrVal) { return dateStrVal === dateStr(new Date()); }
+function getDayDate(mondayStr, i) {
+  const d = new Date(mondayStr + 'T00:00:00');
+  d.setDate(d.getDate() + i);
+  return d;
+}
+function escapeHTML(s) {
+  if (!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// ============================================================
+// DATA HELPERS
+// ============================================================
+function getWeekData(mondayStr) {
+  if (!state.checkins[mondayStr]) state.checkins[mondayStr] = {};
+  state.members.forEach(m => {
+    if (!state.checkins[mondayStr][m]) state.checkins[mondayStr][m] = ['','','','','','',''];
+  });
+  Object.keys(state.checkins[mondayStr]).forEach(m => {
+    if (!state.members.includes(m)) delete state.checkins[mondayStr][m];
+  });
+  return state.checkins[mondayStr];
+}
+
+function getMemberStatus(member, mondayStr) {
+  const week = getWeekData(mondayStr);
+  const days = week[member] || ['','','','','','',''];
+  const workdays = days.slice(0,5), weekend = days.slice(5,7);
+  const doneCount = workdays.filter(d => d===STATUS.DONE).length;
+  const missCount = workdays.filter(d => d===STATUS.MISS).length;
+  const freeCount = workdays.filter(d => d===STATUS.FREE).length;
+  const makeupCount = weekend.filter(d => d===STATUS.MAKEUP).length;
+  const effectiveFree = Math.min(freeCount, 1);
+  const remainingMisses = missCount - effectiveFree - makeupCount;
+  const pendingDays = workdays.filter(d => d===STATUS.EMPTY).length;
+  return {
+    doneCount, missCount, freeCount, makeupCount,
+    effectiveFree, remainingMisses, pendingDays,
+    totalDays: workdays.length,
+    isComplete: remainingMisses <= 0 && pendingDays === 0,
+    needsPenalty: remainingMisses > 0,
+    isFinal: pendingDays === 0
+  };
+}
+
+function getCurrentLessonLabel() {
+  const modNames = {'1':'L1 心座初觉','2':'L2 心相通明','3':'L3 心宫知微','4':'L4 心盘化神'};
+  return (modNames[state.lessonPlan.module]||'') + ' ' + state.lessonPlan.range;
+}
+
+// ============================================================
+// RENDER
+// ============================================================
+function renderAll() {
+  renderStats();
+  renderTable();
+  renderPenaltyBar();
+  renderWeekLabel();
+  renderLessonPlan();
+  saveState(false);
+}
+
+function renderWeekLabel() {
+  const monday = new Date(state.weekStart + 'T00:00:00');
+  const friday = new Date(monday); friday.setDate(friday.getDate()+4);
+  const sunday = new Date(monday); sunday.setDate(sunday.getDate()+6);
+  const weeks = Object.keys(state.checkins).sort();
+  const firstMonday = weeks.length > 0 ? new Date(weeks[0] + 'T00:00:00') : getMonday(new Date());
+  const weekNum = Math.floor((monday - firstMonday) / (7*86400000)) + 1;
+  document.getElementById('weekLabel').textContent =
+    '第' + weekNum + '周  ' + formatDate(monday) + ' - ' + formatDate(sunday);
+}
+
+function renderLessonPlan() {
+  document.getElementById('moduleSelect').value = state.lessonPlan.module;
+  document.getElementById('lessonRange').value = state.lessonPlan.range;
+}
+
+function renderStats() {
+  const container = document.getElementById('statsBar');
+  if (state.members.length === 0) {
+    container.innerHTML = '<div class="col-span-full text-center text-gray-400 text-sm py-4">添加成员后显示统计数据</div>';
+    return;
+  }
+  let totalDone=0, totalMiss=0, totalFree=0, totalMakeup=0, penaltyCount=0;
+  state.members.forEach(m => {
+    const s = getMemberStatus(m, state.weekStart);
+    totalDone += s.doneCount; totalMiss += s.missCount;
+    totalFree += s.freeCount; totalMakeup += s.makeupCount;
+    if (s.needsPenalty && s.isFinal) penaltyCount++;
+  });
+  const totalChecks = totalDone + totalMiss + totalFree;
+  const rate = totalChecks > 0 ? Math.round(totalDone/totalChecks*100) : 0;
+
+  const cards = [
+    { label:'小组成员', value:state.members.length+'人', color:'text-gray-700', bg:'bg-white', icon:'👥' },
+    { label:'打卡完成率', value:rate+'%', color:rate>=80?'text-green-600':'text-yellow-600', bg:'bg-white', icon:'📊' },
+    { label:'已完成', value:totalDone+'次', color:'text-green-600', bg:'bg-green-50', icon:'✅' },
+    { label:'未完成', value:totalMiss+'次', color:'text-red-600', bg:'bg-red-50', icon:'❌' },
+    { label:'待罚才艺', value:penaltyCount+'人', color:penaltyCount>0?'text-red-600':'text-gray-400', bg:penaltyCount>0?'bg-red-50':'bg-gray-50', icon:'🎤' },
+  ];
+  container.innerHTML = cards.map(c => `
+    <div class="${c.bg} rounded-xl p-4 border border-gray-200 flex items-center gap-3">
+      <span class="text-2xl">${c.icon}</span>
+      <div><p class="text-xs text-gray-500">${c.label}</p><p class="text-xl font-bold ${c.color}">${c.value}</p></div>
+    </div>`).join('');
+}
+
+function renderTable() {
+  const thead = document.getElementById('tableHead');
+  const tbody = document.getElementById('tableBody');
+  const empty = document.getElementById('emptyState');
+  if (state.members.length === 0) {
+    thead.innerHTML = ''; tbody.innerHTML = ''; empty.classList.remove('hidden'); return;
+  }
+  empty.classList.add('hidden');
+  const monday = new Date(state.weekStart + 'T00:00:00');
+
+  let headHTML = '<tr class="border-b-2 border-gray-200 bg-gray-50">';
+  headHTML += '<th class="py-3 px-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider" style="min-width:80px">成员</th>';
+  for (let i=0; i<7; i++) {
+    const d = new Date(monday); d.setDate(d.getDate()+i);
+    const cls = isWeekend(i) ? 'text-gray-400' : '';
+    const todayCls = isDayToday(dateStr(d)) ? 'bg-gold/10' : '';
+    headHTML += '<th class="py-3 px-1 text-center text-xs font-semibold uppercase tracking-wider '+todayCls+'" style="min-width:50px">';
+    headHTML += '<span class="'+cls+'">'+DAY_LABELS[i]+'</span><br><span class="text-[10px] text-gray-400 font-normal">'+formatDate(d)+'</span></th>';
+  }
+  headHTML += '<th class="py-3 px-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">状态</th>';
+  headHTML += '<th class="py-3 px-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">才艺</th></tr>';
+  thead.innerHTML = headHTML;
+
+  const week = getWeekData(state.weekStart);
+  let bodyHTML = '';
+  state.members.forEach(member => {
+    const days = week[member] || ['','','','','','',''];
+    const status = getMemberStatus(member, state.weekStart);
+    bodyHTML += '<tr class="border-b border-gray-100 member-row">';
+    bodyHTML += '<td class="py-3 px-3"><div class="flex items-center gap-2"><span class="font-semibold text-gray-800">'+escapeHTML(member)+'</span>';
+    bodyHTML += '<button class="text-gray-300 hover:text-red-400 text-xs" onclick="removeMember(\''+escapeHTML(member)+'\')" title="移除"><i class="fa fa-times"></i></button></div></td>';
+
+    for (let i=0; i<7; i++) {
+      const d = new Date(monday); d.setDate(d.getDate()+i);
+      const ds = dateStr(d);
+      const val = days[i];
+      const weekendDay = isWeekend(i);
+      const todayCls = isDayToday(ds) ? ' cell--today' : '';
+      let cellCls = '';
+      if (weekendDay && val===STATUS.EMPTY) { cellCls = 'cell--weekend'+todayCls; }
+      else { switch(val) {
+        case STATUS.DONE: cellCls='cell--done'+todayCls; break;
+        case STATUS.MISS: cellCls='cell--miss'+todayCls; break;
+        case STATUS.FREE: cellCls='cell--free'+todayCls; break;
+        case STATUS.MAKEUP: cellCls='cell--makeup'+todayCls; break;
+        default: cellCls='cell--empty'+todayCls;
+      }}
+      const clickable = !(weekendDay && val===STATUS.EMPTY);
+      bodyHTML += '<td class="py-2 px-1 text-center"><div class="cell '+cellCls+'" '+
+        (clickable ? 'onclick="toggleCell(\''+escapeHTML(member)+'\','+i+')"' : '')+'>'+
+        (STATUS_ICON[val]||'')+'</div></td>';
+    }
+
+    let stHTML = '';
+    if (status.isComplete) stHTML = '<span class="status-badge status-ok">✅ 完成</span>';
+    else if (status.needsPenalty && status.isFinal) stHTML = '<span class="status-badge status-penalty">⚠️ 待罚</span>';
+    else if (status.pendingDays>0) stHTML = '<span class="status-badge status-pending">进行中</span>';
+    else if (status.makeupCount>0 && status.remainingMisses<=0) stHTML = '<span class="status-badge status-makeup">🔄 已补</span>';
+    else stHTML = '<span class="status-badge status-penalty">🎤 才艺!</span>';
+    bodyHTML += '<td class="py-3 px-3 text-center">'+stHTML+'</td>';
+
+    let penHTML = '';
+    if (status.needsPenalty && status.isFinal) penHTML = '<span class="text-red-500 font-bold text-sm">🎤 贡献才艺</span>';
+    else if (status.isComplete || status.pendingDays>0) penHTML = '<span class="text-gray-300">—</span>';
+    else penHTML = '<span class="text-red-500 font-bold text-sm">🎤 贡献才艺</span>';
+    bodyHTML += '<td class="py-3 px-3 text-center">'+penHTML+'</td></tr>';
+  });
+  tbody.innerHTML = bodyHTML;
+}
+
+function renderPenaltyBar() {
+  const bar = document.getElementById('penaltyBar');
+  const penalties = [];
+  state.members.forEach(m => {
+    const s = getMemberStatus(m, state.weekStart);
+    if (s.needsPenalty && s.isFinal) penalties.push(m);
+  });
+  if (penalties.length===0) {
+    bar.innerHTML = '<div class="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3 text-sm"><span class="text-green-600 font-semibold">🎉</span><span class="text-gray-600">本周暂无惩罚名单</span></div>';
+  } else {
+    bar.innerHTML = '<div class="max-w-7xl mx-auto px-4 py-3 flex items-center gap-3 text-sm flex-wrap"><span class="text-red-600 font-bold text-base">🎤</span><span class="text-red-700 font-semibold">才艺贡献名单：</span>'+
+      penalties.map(p=>'<span class="bg-red-100 text-red-700 px-2 py-0.5 rounded font-semibold">'+escapeHTML(p)+'</span>').join('')+
+      '<span class="text-gray-500 text-xs ml-2">请在群内展示才艺！</span></div>';
+  }
+}
+
+// ============================================================
+// ACTIONS
+// ============================================================
+function toggleCell(member, dayIndex) {
+  const week = getWeekData(state.weekStart);
+  const days = week[member];
+  const cycle = isWeekend(dayIndex) ? STATUS_CYCLE_WEEKEND : STATUS_CYCLE_WORKDAY;
+  const curIdx = cycle.indexOf(days[dayIndex]);
+  days[dayIndex] = cycle[(curIdx + 1) % cycle.length];
+  renderAll();
+}
+
+function addMember(name) {
+  name = name.trim();
+  if (!name || state.members.includes(name)) { showToast(name?'「'+name+'」已存在':'请输入名称'); return; }
+  state.members.push(name);
+  Object.keys(state.checkins).forEach(wk => { if(!state.checkins[wk][name]) state.checkins[wk][name]=['','','','','','','']; });
+  getWeekData(state.weekStart);
+  state.members.sort((a,b) => a.localeCompare(b,'zh'));
+  renderAll(); closeModal();
+  showToast('已添加「'+name+'」');
+}
+
+function removeMember(name) {
+  if (!confirm('确定移除「'+name+'」？')) return;
+  state.members = state.members.filter(m => m!==name);
+  Object.keys(state.checkins).forEach(wk => { delete state.checkins[wk][name]; });
+  renderAll();
+  showToast('已移除「'+name+'」');
+}
+
+function prevWeek() {
+  const d = new Date(state.weekStart+'T00:00:00'); d.setDate(d.getDate()-7);
+  state.weekStart = dateStr(d); renderAll();
+}
+function nextWeek() {
+  const d = new Date(state.weekStart+'T00:00:00'); d.setDate(d.getDate()+7);
+  state.weekStart = dateStr(d); renderAll();
+}
+function goCurrentWeek() { state.weekStart = dateStr(getMonday(new Date())); renderAll(); }
+function updateLessonPlan() {
+  state.lessonPlan.module = document.getElementById('moduleSelect').value;
+  state.lessonPlan.range = document.getElementById('lessonRange').value;
+  renderAll();
+}
+
+// ============================================================
+// REMINDER GENERATION
+// ============================================================
+function generateReminder() {
+  const week = getWeekData(state.weekStart);
+  const today = new Date();
+  const monday = new Date(state.weekStart+'T00:00:00');
+  const currentDayIndex = Math.floor((today - monday) / 86400000);
+  let msg = '';
+
+  if (currentDayIndex >= 0 && currentDayIndex < 5) {
+    const needRemind = [];
+    state.members.forEach(m => {
+      const days = week[m]||['','','','','','',''];
+      if (days[currentDayIndex]===STATUS.EMPTY || days[currentDayIndex]===STATUS.MISS) needRemind.push(m);
+    });
+    if (needRemind.length > 0) {
+      msg += '📢 今日打卡提醒\n📅 '+DAY_NAMES[currentDayIndex]+' '+formatDate(today)+'\n📖 '+getCurrentLessonLabel()+'\n\n以下小伙伴记得打卡～\n';
+      needRemind.forEach(m => { msg += '  @'+m+'\n'; });
+      msg += '\n打卡方式：将当日学习问题回复或公众号标题更新至文档\n📎 打卡表：https://www.kdocs.cn/l/cpylx0BytRQu\n\n---\n\n';
+    }
+  }
+
+  if (currentDayIndex >= 5 || currentDayIndex < 0) {
+    msg += '📢 周末补打卡提醒\n\n';
+    const needMakeup = [];
+    state.members.forEach(m => {
+      const s = getMemberStatus(m, state.weekStart);
+      if (s.missCount > 1) needMakeup.push({name:m, need:s.missCount-(s.freeCount>0?1:0)});
+    });
+    if (needMakeup.length>0) {
+      needMakeup.forEach(item => { msg += '  @'+item.name+' 需补 '+item.need+' 天\n'; });
+      msg += '\n周六日补完即可，下周一前未完成需贡献才艺 🎤\n';
+    } else { msg += '大家都完成了，周末愉快！🎉\n'; }
+    msg += '\n---\n\n';
+  }
+
+  if (currentDayIndex >= 7 || (currentDayIndex>=5 && today.getDay()===1)) {
+    msg += '⚖️ 本周清算\n\n';
+    const penalties = [];
+    state.members.forEach(m => {
+      const s = getMemberStatus(m, state.weekStart);
+      if (s.needsPenalty && s.isFinal) penalties.push({name:m, remaining:s.remainingMisses});
+    });
+    if (penalties.length>0) {
+      msg += '以下小伙伴需要贡献才艺 🎤：\n';
+      penalties.forEach(p => { msg += '  @'+p.name+' （缺'+p.remaining+'天未补）\n'; });
+      msg += '\n请在群内展示才艺，形式不限！\n';
+    } else { msg += '本周全员通过！🎉\n'; }
+  }
+  return msg || '暂无提醒内容。';
+}
+
+// ============================================================
+// EXPORT / IMPORT
+// ============================================================
+function exportData() {
+  const data = { members: state.members, checkins: state.checkins, lessonPlan: state.lessonPlan, exportedAt: new Date().toISOString() };
+  const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = '快乐卷卷打卡数据_'+dateStr(new Date())+'.json'; a.click();
+  URL.revokeObjectURL(url); showToast('数据已导出');
+}
+
+function importData() {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = '.json';
+  input.onchange = (e) => {
+    const file = e.target.files[0]; if(!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if(!data.members||!data.checkins) throw new Error('无效数据格式');
+        if(!confirm('导入将覆盖当前数据，确定继续？\n成员数：'+data.members.length+'\n记录周数：'+Object.keys(data.checkins).length)) return;
+        state.members = data.members; state.checkins = data.checkins;
+        if(data.lessonPlan) state.lessonPlan = data.lessonPlan;
+        renderAll(); showToast('数据已导入');
+      } catch(err) { alert('导入失败：'+err.message); }
+    };
+    reader.readAsText(file);
+  };
+  input.click();
+}
+
+function resetData() {
+  if(!confirm('确定清空所有数据？此操作不可恢复！')) return;
+  if(!confirm('再次确认：清空所有成员和打卡记录？')) return;
+  state.members = [...REAL_MEMBERS]; state.checkins = {}; state.lessonPlan = {module:'1',range:'第1-5讲'};
+  state.weekStart = dateStr(getMonday(new Date())); cloudObjId = null;
+  renderAll(); showToast('数据已重置');
+}
+
+// ============================================================
+// LeanCloud 配置保存
+// ============================================================
+function saveCloudConfig() {
+  const appId = document.getElementById('lcAppId').value.trim();
+  const appKey = document.getElementById('lcAppKey').value.trim();
+  if (!appId || !appKey) { showToast('请填写 AppID 和 AppKey'); return; }
+  LC_CONFIG.appId = appId;
+  LC_CONFIG.appKey = appKey;
+  localStorage.setItem('lc_config', JSON.stringify({ appId, appKey }));
+  closeModal();
+  showToast('配置已保存，刷新页面后生效');
+  setTimeout(() => location.reload(), 1500);
+}
+
+// ============================================================
+// MODALS
+// ============================================================
+function openAddMember() {
+  showModal('添加成员', `
+    <div class="space-y-4">
+      <div><label class="text-sm font-semibold text-gray-700">成员名称</label>
+        <input type="text" id="newMemberName" class="w-full mt-1" placeholder="输入姓名或昵称" onkeydown="if(event.key==='Enter')addMember(document.getElementById('newMemberName').value)"></div>
+      <div><label class="text-sm font-semibold text-gray-700">批量添加（每行一个）</label>
+        <textarea id="batchMembers" rows="5" class="w-full mt-1" placeholder="张三&#10;李四&#10;王五"></textarea></div>
+      <div class="flex gap-2">
+        <button class="btn btn-gold flex-1" onclick="const n=document.getElementById('newMemberName').value.trim();const b=document.getElementById('batchMembers').value.trim();if(b){b.split(/[\\n,，、]+/).map(s=>s.trim()).filter(Boolean).forEach(x=>addMember(x))}else if(n){addMember(n)}">添加</button>
+        <button class="btn btn-outline" onclick="closeModal()">取消</button></div>
+    </div>`);
+}
+
+function openReminder() {
+  const msg = generateReminder();
+  showModal('📢 生成群提醒消息', `
+    <div class="space-y-4">
+      <textarea id="reminderMsg" rows="14" class="w-full font-mono text-sm" readonly>${escapeHTML(msg)}</textarea>
+      <div class="flex gap-2">
+        <button class="btn btn-gold flex-1" onclick="const t=document.getElementById('reminderMsg');t.select();navigator.clipboard.writeText(t.value).then(()=>showToast('已复制'));"><i class="fa fa-clipboard"></i> 复制消息</button>
+        <button class="btn btn-outline" onclick="closeModal()">关闭</button></div>
+    </div>`);
+}
+
+function openSettings() {
+  const savedConfig = JSON.parse(localStorage.getItem('lc_config') || '{}');
+  const currentAppId = LC_CONFIG.appId || savedConfig.appId || '';
+  const currentAppKey = LC_CONFIG.appKey || savedConfig.appKey || '';
+
+  showModal('⚙️ 设置 & 数据管理', `
+    <div class="space-y-5">
+      <!-- 多人协作配置 -->
+      <div class="bg-green-50 rounded-xl p-4 border border-green-200">
+        <h4 class="font-semibold text-green-800 mb-2">☁️ 多人协作配置</h4>
+        <p class="text-xs text-green-700 mb-3">配置 LeanCloud 后，所有成员打开此页面看到同一份数据，打卡实时同步。不配置则使用浏览器本地存储（单机模式）。</p>
+        <div class="space-y-2">
+          <div><label class="text-xs font-semibold text-gray-600">LeanCloud AppID</label>
+            <input type="text" id="lcAppId" class="w-full" value="${escapeHTML(currentAppId)}" placeholder="粘贴 AppID"></div>
+          <div><label class="text-xs font-semibold text-gray-600">LeanCloud AppKey</label>
+            <input type="text" id="lcAppKey" class="w-full" value="${escapeHTML(currentAppKey)}" placeholder="粘贴 AppKey"></div>
+        </div>
+        <div class="flex gap-2 mt-3">
+          <button class="btn btn-cloud btn-sm" onclick="saveCloudConfig()"><i class="fa fa-cloud"></i> 保存并启用协作</button>
+          <button class="btn btn-outline btn-sm" onclick="openDeployGuide()">📖 部署指南</button>
+        </div>
+        <p class="text-xs text-gray-400 mt-2">注册地址：<a href="https://console.leancloud.cn/register" target="_blank" class="text-blue-500 underline">leancloud.cn</a>，免费额度足够小团队使用</p>
+      </div>
+
+      <!-- 数据管理 -->
+      <div>
+        <h4 class="font-semibold text-gray-800 mb-2">💾 数据管理</h4>
+        <div class="flex gap-2 flex-wrap">
+          <button class="btn btn-outline btn-sm" onclick="exportData();closeModal();"><i class="fa fa-download"></i> 导出 JSON</button>
+          <button class="btn btn-outline btn-sm" onclick="importData();closeModal();"><i class="fa fa-upload"></i> 导入 JSON</button>
+          <button class="btn btn-danger btn-sm" onclick="resetData();closeModal();"><i class="fa fa-trash"></i> 重置数据</button>
+        </div>
+      </div>
+
+      <!-- 快捷操作 -->
+      <div>
+        <h4 class="font-semibold text-gray-800 mb-2">🔧 快捷操作</h4>
+        <div class="flex gap-2 flex-wrap">
+          <button class="btn btn-outline btn-sm" onclick="state.members=[...REAL_MEMBERS];Object.keys(state.checkins).forEach(w=>{state.checkins[w]={}});getWeekData(state.weekStart);renderAll();closeModal();showToast('已重置为12位小组成员')">重置成员列表</button>
+          <button class="btn btn-outline btn-sm" onclick="const w=getWeekData(state.weekStart);state.members.forEach(m=>{for(let i=0;i<5;i++)w[m][i]=STATUS.DONE});renderAll();closeModal();showToast('已全部标记为完成')">本周全员完成</button>
+        </div>
+      </div>
+    </div>`);
+}
+
+function openDeployGuide() {
+  closeModal();
+  showModal('📖 多人协作部署指南', `
+    <div class="space-y-4 text-sm leading-relaxed">
+      <div>
+        <h4 class="font-semibold text-gray-800 mb-1">第一步：注册 LeanCloud（5分钟）</h4>
+        <ol class="list-decimal ml-5 space-y-1 text-gray-600">
+          <li>打开 <a href="https://console.leancloud.cn/register" target="_blank" class="text-blue-500 underline">leancloud.cn</a> 注册账号（手机号即可）</li>
+          <li>进入控制台，点击「创建应用」，选择「开发版」（免费）</li>
+          <li>应用名填「快乐卷卷打卡」，其余默认</li>
+          <li>进入应用 → 设置 → 应用凭证 → 复制 <b>AppID</b> 和 <b>AppKey</b></li>
+        </ol>
+      </div>
+
+      <div>
+        <h4 class="font-semibold text-gray-800 mb-1">第二步：配置本工具（1分钟）</h4>
+        <ol class="list-decimal ml-5 space-y-1 text-gray-600">
+          <li>打开本工具的「设置」→ 「多人协作配置」</li>
+          <li>粘贴 AppID 和 AppKey，点击「保存并启用协作」</li>
+          <li>页面刷新后，左上角显示绿色圆点「云端协作」即成功</li>
+        </ol>
+      </div>
+
+      <div>
+        <h4 class="font-semibold text-gray-800 mb-1">第三步：部署到公网（5分钟，二选一）</h4>
+        <p class="text-gray-500 text-xs mb-2">部署后群成员通过链接访问，数据云端同步。</p>
+
+        <div class="bg-blue-50 rounded-lg p-3 mb-3 border border-blue-200">
+          <p class="font-semibold text-blue-800 text-sm">方案A：Gitee Pages（推荐，国内访问快）</p>
+          <ol class="list-decimal ml-5 space-y-1 text-blue-700 text-xs">
+            <li>注册 <a href="https://gitee.com" target="_blank" class="underline">gitee.com</a></li>
+            <li>创建仓库 → 上传本 HTML 文件 → 提交</li>
+            <li>仓库 → 服务 → Gitee Pages → 启动</li>
+            <li>获得 URL，分享到微信群即可</li>
+          </ol>
+        </div>
+
+        <div class="bg-gray-50 rounded-lg p-3 border border-gray-200">
+          <p class="font-semibold text-gray-800 text-sm">方案B：GitHub Pages</p>
+          <ol class="list-decimal ml-5 space-y-1 text-gray-600 text-xs">
+            <li>注册 GitHub → 创建仓库 → 上传本 HTML 文件</li>
+            <li>Settings → Pages → Source: main branch → Save</li>
+            <li>获得 <code>https://用户名.github.io/仓库名/快乐卷卷打卡监督工具.html</code></li>
+          </ol>
+        </div>
+      </div>
+
+      <div class="bg-amber-50 rounded-lg p-3 border border-amber-200">
+        <p class="font-semibold text-amber-800 text-sm">⚠️ 部署前注意事项</p>
+        <p class="text-xs text-amber-700">部署前务必先完成第二步（配置 LeanCloud），并将含有密钥的 HTML 文件上传。确保 LeanCloud 应用的「安全设置」中允许你的部署域名访问。</p>
+      </div>
+
+      <button class="btn btn-gold w-full mt-2" onclick="closeModal()">我知道了</button>
+    </div>`);
+}
+
+function showModal(title, bodyHTML) {
+  document.getElementById('modalContainer').innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <div class="flex items-center justify-between mb-5">
+          <h3 class="text-lg font-bold" style="color:var(--blue)">${title}</h3>
+          <button class="text-gray-400 hover:text-gray-600 text-xl" onclick="closeModal()">&times;</button></div>
+        ${bodyHTML}
+      </div></div>`;
+}
+function closeModal() { document.getElementById('modalContainer').innerHTML = ''; }
+function showToast(msg) {
+  const container = document.getElementById('toastContainer');
+  const toast = document.createElement('div'); toast.className = 'toast'; toast.textContent = msg;
+  container.appendChild(toast); setTimeout(() => toast.remove(), 2000);
+}
+
+// ============================================================
+// INIT
+// ============================================================
+async function init() {
+  // Restore saved LC config
+  const savedConfig = JSON.parse(localStorage.getItem('lc_config') || '{}');
+  if (savedConfig.appId) LC_CONFIG.appId = savedConfig.appId;
+  if (savedConfig.appKey) LC_CONFIG.appKey = savedConfig.appKey;
+
+  initCloud();
+  updateSyncIndicator(isCloudMode ? 'online' : 'offline');
+
+  await loadState();
+  if (!state.weekStart || !state.checkins[state.weekStart]) {
+    state.weekStart = dateStr(getMonday(new Date()));
+  }
+  getWeekData(state.weekStart);
+  renderAll();
+}
+
+document.addEventListener('DOMContentLoaded', init);
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey || e.metaKey) {
+    switch(e.key) {
+      case 'ArrowLeft': e.preventDefault(); prevWeek(); break;
+      case 'ArrowRight': e.preventDefault(); nextWeek(); break;
+      case 'n': e.preventDefault(); openAddMember(); break;
+    }
+  }
+});
+</script>
+
+</body>
+</html>
