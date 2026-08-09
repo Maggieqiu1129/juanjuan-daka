@@ -245,9 +245,13 @@ async function supabaseAPI(path, options = {}) {
   const headers = {
     'apikey': SUPABASE_CONFIG.key,
     'Authorization': 'Bearer ' + SUPABASE_CONFIG.key,
-    'Content-Type': 'application/json',
+    'Accept': 'application/json',
     ...(options.headers || {})
   };
+  // Only set Content-Type for requests with a body
+  if (options.body) {
+    headers['Content-Type'] = 'application/json';
+  }
   const res = await fetch(url, { ...options, headers });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
