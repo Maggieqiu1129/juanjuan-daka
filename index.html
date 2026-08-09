@@ -6,8 +6,8 @@
 <title>快乐卷卷 · 学习打卡监督工具</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css">
-<!-- LeanCloud SDK - 多人协作数据同步 -->
-<script src="https://cdn.jsdelivr.net/npm/leancloud-storage@4/dist/av-min.js"></script>
+<!-- Supabase SDK - 多人协作数据同步 -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700;900&family=Noto+Sans+SC:wght@300;400;500;700&display=swap');
 
@@ -199,13 +199,11 @@ input[type="text"]:focus, textarea:focus, select:focus { border-color: var(--gol
 
 <script>
 // ============================================================
-// 多人协作配置 — 填入你的 LeanCloud 密钥后自动切换云端模式
-// 注册地址：https://console.leancloud.cn/register
-// 创建应用后，在「设置 → 应用凭证」中获取 AppID 和 AppKey
+// 多人协作配置 — 已配置 Supabase，自动云端同步
 // ============================================================
-const LC_CONFIG = {
-  appId: '',   // 填入 LeanCloud AppID
-  appKey: '',  // 填入 LeanCloud AppKey
+const SUPABASE_CONFIG = {
+  url: 'https://kiywilmavkeyvbofkznz.supabase.co',
+  key: 'sb_publishable_1AAhpRWy2Hbh69G6VNRVHA_R5H6QzK4'
 };
 
 // ============================================================
@@ -229,22 +227,22 @@ let state = {
   lessonPlan: { module: '1', range: '第1-5讲' }
 };
 
-let cloudObjId = null;     // LeanCloud 对象 ID
 let isCloudMode = false;   // 是否云端模式
 let saveTimeout = null;    // 防抖保存
 
 // ============================================================
 // DATA LAYER — 自动选择云端/本地
 // ============================================================
+let supabase = null;
+
 function initCloud() {
-  if (LC_CONFIG.appId && LC_CONFIG.appKey && typeof AV !== 'undefined') {
+  if (SUPABASE_CONFIG.url && SUPABASE_CONFIG.key && typeof supabase !== 'undefined') {
     try {
-      const serverURL = LC_CONFIG.serverURL || `https://${LC_CONFIG.appId.substring(0,8)}.api.lncdn.net`;
-      AV.init({ appId: LC_CONFIG.appId, appKey: LC_CONFIG.appKey, serverURL });
+      supabase = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.key);
       isCloudMode = true;
       return true;
     } catch(e) {
-      console.warn('LeanCloud 初始化失败，使用本地模式', e);
+      console.warn('Supabase 初始化失败，使用本地模式', e);
     }
   }
   isCloudMode = false;
@@ -252,23 +250,21 @@ function initCloud() {
 }
 
 async function loadState() {
-  if (isCloudMode) {
+  if (isCloudMode && supabase) {
     try {
-      const AppData = AV.Object.extend('AppData');
-      const query = new AV.Query('AppData');
-      query.equalTo('key', 'main');
-      const obj = await query.first();
-      if (obj) {
-        cloudObjId = obj.id;
-        const data = JSON.parse(obj.get('jsonData'));
-        state.members = data.members || [...REAL_MEMBERS];
-        state.checkins = data.checkins || {};
-        state.lessonPlan = data.lessonPlan || { module: '1', range: '第1-5讲' };
+      const { data, error } = await supabase.from('app_data').select('json_data').eq('key', 'main').single();
+      if (data && data.json_data) {
+        const d = data.json_data;
+        state.members = d.members || [...REAL_MEMBERS];
+        state.checkins = d.checkins || {};
+        state.lessonPlan = d.lessonPlan || { module: '1', range: '第1-5讲' };
         return;
       }
-      // No data yet, create initial
-      await saveToCloud(true);
-      return;
+      if (!error) {
+        await saveToCloud(true);
+        return;
+      }
+      throw error;
     } catch(e) {
       console.error('云端加载失败，切换本地模式', e);
       isCloudMode = false;
@@ -279,9 +275,8 @@ async function loadState() {
 }
 
 async function saveState(immediate) {
-  if (isCloudMode) {
+  if (isCloudMode && supabase) {
     if (!immediate) {
-      // Debounce: save after 800ms of inactivity
       if (saveTimeout) clearTimeout(saveTimeout);
       saveTimeout = setTimeout(() => saveToCloud(false), 800);
       updateSyncIndicator('saving');
@@ -293,24 +288,18 @@ async function saveState(immediate) {
   }
 }
 
-async function saveToCloud(isNew) {
-  const AppData = AV.Object.extend('AppData');
-  let obj;
-  if (isNew && !cloudObjId) {
-    obj = new AppData();
-    obj.set('key', 'main');
-  } else {
-    obj = AV.Object.createWithoutData('AppData', cloudObjId);
-  }
-  obj.set('jsonData', JSON.stringify({
+async function saveToCloud() {
+  const jsonData = {
     members: state.members,
     checkins: state.checkins,
     lessonPlan: state.lessonPlan
-  }));
-  obj.set('updatedAt', new Date().toISOString());
-  const saved = await obj.save();
-  cloudObjId = saved.id;
-  updateSyncIndicator('online');
+  };
+  const { error } = await supabase.from('app_data').upsert(
+    { key: 'main', json_data: jsonData, updated_at: new Date().toISOString() },
+    { onConflict: 'key' }
+  );
+  if (!error) updateSyncIndicator('online');
+  else console.error('保存失败', error);
 }
 
 function loadFromLocal() {
@@ -696,23 +685,8 @@ function resetData() {
   if(!confirm('确定清空所有数据？此操作不可恢复！')) return;
   if(!confirm('再次确认：清空所有成员和打卡记录？')) return;
   state.members = [...REAL_MEMBERS]; state.checkins = {}; state.lessonPlan = {module:'1',range:'第1-5讲'};
-  state.weekStart = dateStr(getMonday(new Date())); cloudObjId = null;
+  state.weekStart = dateStr(getMonday(new Date()));
   renderAll(); showToast('数据已重置');
-}
-
-// ============================================================
-// LeanCloud 配置保存
-// ============================================================
-function saveCloudConfig() {
-  const appId = document.getElementById('lcAppId').value.trim();
-  const appKey = document.getElementById('lcAppKey').value.trim();
-  if (!appId || !appKey) { showToast('请填写 AppID 和 AppKey'); return; }
-  LC_CONFIG.appId = appId;
-  LC_CONFIG.appKey = appKey;
-  localStorage.setItem('lc_config', JSON.stringify({ appId, appKey }));
-  closeModal();
-  showToast('配置已保存，刷新页面后生效');
-  setTimeout(() => location.reload(), 1500);
 }
 
 // ============================================================
@@ -742,28 +716,23 @@ function openReminder() {
     </div>`);
 }
 
-function openSettings() {
-  const savedConfig = JSON.parse(localStorage.getItem('lc_config') || '{}');
-  const currentAppId = LC_CONFIG.appId || savedConfig.appId || '';
-  const currentAppKey = LC_CONFIG.appKey || savedConfig.appKey || '';
+function testCloudConnection() {
+  if (!supabase) { showToast('未连接云端'); return; }
+  supabase.from('app_data').select('key').eq('key', 'main').single().then(({ data, error }) => {
+    if (error) { showToast('连接失败：数据库表不存在，请执行 SQL'); document.getElementById('cloudStatusLabel').textContent = '表未创建'; }
+    else { showToast('云端连接正常！'); document.getElementById('cloudStatusLabel').textContent = '✅ 云端协作正常'; }
+  });
+}
 
+function openSettings() {
   showModal('⚙️ 设置 & 数据管理', `
     <div class="space-y-5">
-      <!-- 多人协作配置 -->
+      <!-- 多人协作状态 -->
       <div class="bg-green-50 rounded-xl p-4 border border-green-200">
-        <h4 class="font-semibold text-green-800 mb-2">☁️ 多人协作配置</h4>
-        <p class="text-xs text-green-700 mb-3">配置 LeanCloud 后，所有成员打开此页面看到同一份数据，打卡实时同步。不配置则使用浏览器本地存储（单机模式）。</p>
-        <div class="space-y-2">
-          <div><label class="text-xs font-semibold text-gray-600">LeanCloud AppID</label>
-            <input type="text" id="lcAppId" class="w-full" value="${escapeHTML(currentAppId)}" placeholder="粘贴 AppID"></div>
-          <div><label class="text-xs font-semibold text-gray-600">LeanCloud AppKey</label>
-            <input type="text" id="lcAppKey" class="w-full" value="${escapeHTML(currentAppKey)}" placeholder="粘贴 AppKey"></div>
-        </div>
-        <div class="flex gap-2 mt-3">
-          <button class="btn btn-cloud btn-sm" onclick="saveCloudConfig()"><i class="fa fa-cloud"></i> 保存并启用协作</button>
-          <button class="btn btn-outline btn-sm" onclick="openDeployGuide()">📖 部署指南</button>
-        </div>
-        <p class="text-xs text-gray-400 mt-2">注册地址：<a href="https://console.leancloud.cn/register" target="_blank" class="text-blue-500 underline">leancloud.cn</a>，免费额度足够小团队使用</p>
+        <h4 class="font-semibold text-green-800 mb-2">☁️ 多人协作状态</h4>
+        <p class="text-xs text-green-700 mb-2">Supabase 已配置 · Project: kiywilmavkeyvbofkznz</p>
+        <p class="text-xs text-gray-500" id="cloudStatus">状态：<span id="cloudStatusLabel">检测中...</span></p>
+        <button class="btn btn-outline btn-sm mt-2" onclick="testCloudConnection()">测试连接</button>
       </div>
 
       <!-- 数据管理 -->
@@ -784,62 +753,6 @@ function openSettings() {
           <button class="btn btn-outline btn-sm" onclick="const w=getWeekData(state.weekStart);state.members.forEach(m=>{for(let i=0;i<5;i++)w[m][i]=STATUS.DONE});renderAll();closeModal();showToast('已全部标记为完成')">本周全员完成</button>
         </div>
       </div>
-    </div>`);
-}
-
-function openDeployGuide() {
-  closeModal();
-  showModal('📖 多人协作部署指南', `
-    <div class="space-y-4 text-sm leading-relaxed">
-      <div>
-        <h4 class="font-semibold text-gray-800 mb-1">第一步：注册 LeanCloud（5分钟）</h4>
-        <ol class="list-decimal ml-5 space-y-1 text-gray-600">
-          <li>打开 <a href="https://console.leancloud.cn/register" target="_blank" class="text-blue-500 underline">leancloud.cn</a> 注册账号（手机号即可）</li>
-          <li>进入控制台，点击「创建应用」，选择「开发版」（免费）</li>
-          <li>应用名填「快乐卷卷打卡」，其余默认</li>
-          <li>进入应用 → 设置 → 应用凭证 → 复制 <b>AppID</b> 和 <b>AppKey</b></li>
-        </ol>
-      </div>
-
-      <div>
-        <h4 class="font-semibold text-gray-800 mb-1">第二步：配置本工具（1分钟）</h4>
-        <ol class="list-decimal ml-5 space-y-1 text-gray-600">
-          <li>打开本工具的「设置」→ 「多人协作配置」</li>
-          <li>粘贴 AppID 和 AppKey，点击「保存并启用协作」</li>
-          <li>页面刷新后，左上角显示绿色圆点「云端协作」即成功</li>
-        </ol>
-      </div>
-
-      <div>
-        <h4 class="font-semibold text-gray-800 mb-1">第三步：部署到公网（5分钟，二选一）</h4>
-        <p class="text-gray-500 text-xs mb-2">部署后群成员通过链接访问，数据云端同步。</p>
-
-        <div class="bg-blue-50 rounded-lg p-3 mb-3 border border-blue-200">
-          <p class="font-semibold text-blue-800 text-sm">方案A：Gitee Pages（推荐，国内访问快）</p>
-          <ol class="list-decimal ml-5 space-y-1 text-blue-700 text-xs">
-            <li>注册 <a href="https://gitee.com" target="_blank" class="underline">gitee.com</a></li>
-            <li>创建仓库 → 上传本 HTML 文件 → 提交</li>
-            <li>仓库 → 服务 → Gitee Pages → 启动</li>
-            <li>获得 URL，分享到微信群即可</li>
-          </ol>
-        </div>
-
-        <div class="bg-gray-50 rounded-lg p-3 border border-gray-200">
-          <p class="font-semibold text-gray-800 text-sm">方案B：GitHub Pages</p>
-          <ol class="list-decimal ml-5 space-y-1 text-gray-600 text-xs">
-            <li>注册 GitHub → 创建仓库 → 上传本 HTML 文件</li>
-            <li>Settings → Pages → Source: main branch → Save</li>
-            <li>获得 <code>https://用户名.github.io/仓库名/快乐卷卷打卡监督工具.html</code></li>
-          </ol>
-        </div>
-      </div>
-
-      <div class="bg-amber-50 rounded-lg p-3 border border-amber-200">
-        <p class="font-semibold text-amber-800 text-sm">⚠️ 部署前注意事项</p>
-        <p class="text-xs text-amber-700">部署前务必先完成第二步（配置 LeanCloud），并将含有密钥的 HTML 文件上传。确保 LeanCloud 应用的「安全设置」中允许你的部署域名访问。</p>
-      </div>
-
-      <button class="btn btn-gold w-full mt-2" onclick="closeModal()">我知道了</button>
     </div>`);
 }
 
@@ -864,11 +777,6 @@ function showToast(msg) {
 // INIT
 // ============================================================
 async function init() {
-  // Restore saved LC config
-  const savedConfig = JSON.parse(localStorage.getItem('lc_config') || '{}');
-  if (savedConfig.appId) LC_CONFIG.appId = savedConfig.appId;
-  if (savedConfig.appKey) LC_CONFIG.appKey = savedConfig.appKey;
-
   initCloud();
   updateSyncIndicator(isCloudMode ? 'online' : 'offline');
 
@@ -878,6 +786,10 @@ async function init() {
   }
   getWeekData(state.weekStart);
   renderAll();
+
+  if (!isCloudMode) {
+    showToast('数据库表未创建，请在 Supabase SQL Editor 中执行建表 SQL');
+  }
 }
 
 document.addEventListener('DOMContentLoaded', init);
