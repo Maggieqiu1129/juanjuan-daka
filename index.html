@@ -249,8 +249,15 @@ async function supabaseAPI(path, options = {}) {
     ...(options.headers || {})
   };
   const res = await fetch(url, { ...options, headers });
-  if (!res.ok) throw new Error('API error: ' + res.status);
-  return res.json();
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error('API error ' + res.status + ': ' + text.substring(0, 200));
+  }
+  const text = await res.text();
+  if (!text) throw new Error('API returned empty response');
+  try { return JSON.parse(text); } catch(e) {
+    throw new Error('非JSON响应(' + text.substring(0, 100) + ')');
+  }
 }
 
 async function loadState() {
