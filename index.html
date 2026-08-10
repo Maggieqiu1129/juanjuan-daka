@@ -243,53 +243,36 @@ function initCloud() {
 async function supabaseAPI(path, options = {}) {
   const url = SUPABASE_CONFIG.url + '/rest/v1/' + path;
   const method = options.method || 'GET';
-  const headers = {
-    'apikey': SUPABASE_CONFIG.key,
-    'Authorization': 'Bearer ' + SUPABASE_CONFIG.key,
-    'Accept': 'application/json',
-    ...(options.headers || {})
-  };
-  if (options.body) {
-    headers['Content-Type'] = 'application/json';
-  }
 
-  // Use XHR for GET (more compatible with various network environments)
-  if (method === 'GET' && !options.body) {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('GET', url);
-      xhr.setRequestHeader('apikey', SUPABASE_CONFIG.key);
-      xhr.setRequestHeader('Authorization', 'Bearer ' + SUPABASE_CONFIG.key);
-      xhr.setRequestHeader('Accept', 'application/json');
-      xhr.timeout = 8000;
-      xhr.onload = function() {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          const text = xhr.responseText;
-          if (!text) return reject(new Error('XHR empty response (status=' + xhr.status + ')'));
-          try { resolve(JSON.parse(text)); } catch(e) {
-            reject(new Error('XHR非JSON: ' + text.substring(0, 100)));
-          }
-        } else {
-          reject(new Error('XHR error ' + xhr.status + ': ' + (xhr.responseText || '').substring(0, 200)));
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, url);
+    xhr.setRequestHeader('apikey', SUPABASE_CONFIG.key);
+    xhr.setRequestHeader('Authorization', 'Bearer ' + SUPABASE_CONFIG.key);
+    xhr.setRequestHeader('Accept', 'application/json');
+    if (options.body) {
+      xhr.setRequestHeader('Content-Type', 'application/json');
+    }
+    xhr.timeout = 8000;
+    xhr.onload = function() {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        const text = xhr.responseText;
+        // POST/PATCH may return empty body on success
+        if (!text) {
+          if (method === 'GET') return reject(new Error('[v6] GET返回空响应 status=' + xhr.status));
+          return resolve(null); // Non-GET empty = success
         }
-      };
-      xhr.onerror = function() { reject(new Error('XHR网络错误')); };
-      xhr.ontimeout = function() { reject(new Error('XHR请求超时')); };
-      xhr.send();
-    });
-  }
-
-  // Use fetch for POST/PATCH
-  const res = await fetch(url, { method, headers, body: options.body, signal: options.signal });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error('API error ' + res.status + ': ' + text.substring(0, 200));
-  }
-  const text = await res.text();
-  if (!text) throw new Error('API returned empty response');
-  try { return JSON.parse(text); } catch(e) {
-    throw new Error('非JSON响应(' + text.substring(0, 100) + ')');
-  }
+        try { resolve(JSON.parse(text)); } catch(e) {
+          reject(new Error('[v6] 非JSON: ' + text.substring(0, 100)));
+        }
+      } else {
+        reject(new Error('[v6] HTTP' + xhr.status + ': ' + (xhr.responseText || '').substring(0, 200)));
+      }
+    };
+    xhr.onerror = function() { reject(new Error('[v6] 网络错误')); };
+    xhr.ontimeout = function() { reject(new Error('[v6] 请求超时')); };
+    xhr.send(options.body || null);
+  });
 }
 
 async function loadState() {
